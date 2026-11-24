@@ -212,7 +212,7 @@ def parse_weights(data):
 
 
 def weights_from_arg(text):
-    """AAPL=22.04,AXP=17.14 -> {ticker: weight}"""
+    """RELIANCE=30,HDFCBANK=25 -> {ticker: weight}"""
     out = {}
     for part in text.split(","):
         part = part.strip()
@@ -580,11 +580,11 @@ def normalise(rows, blocked=(), top=None):
 
 
 def allocate(rows, investable, cap):
-    """Exact (unrounded) dollars per ticker with the cap enforced.
+    """Exact (unrounded) rupees per ticker with the cap enforced.
 
     Proportional to weight; any stock over the cap is pinned at the cap and
     the rest of the money is shared over the others, repeated until no stock
-    is over. Returns ({ticker: dollars}, set of capped tickers)."""
+    is over. Returns ({ticker: rupees}, set of capped tickers)."""
     alloc, capped = {}, set()
     active = [r for r in rows]
     money_left = investable
@@ -608,7 +608,7 @@ def allocate(rows, investable, cap):
 
 
 def round_to_unit(exact, capped, order, cap, unit):
-    """Round to whole dollars (unit 1) or cents (unit 0.01) and keep the total.
+    """Round to whole rupees (unit 1) or paise (unit 0.01) and keep the total.
 
     The total placed is the exact total rounded DOWN to the unit, so it never
     spends money you do not have. Each slice is rounded to the nearest unit,
@@ -779,7 +779,7 @@ def report(result, orders, source=""):
                     money(r["investable"]), _num(r["max_position_pct"]), money(r["cap"])))
     lines.append("")
     has_price = any("price" in p for p in r["positions"])
-    head = "%-7s %-22s %8s %11s" % ("ticker", "name", "weight", "dollars")
+    head = "%-7s %-22s %8s %11s" % ("ticker", "name", "weight", "rupees")
     if has_price:
         head += " %10s %10s" % ("price", "shares")
     lines.append(head + "  note")
@@ -920,16 +920,16 @@ def main(argv=None):
     ap.add_argument("--prices", help="prices JSON (default trader/prices.json if it exists)")
     ap.add_argument("--portfolio", default="trader/portfolio.json",
                     help="your account; its cash caps the size if it exists")
-    ap.add_argument("--now", help="pretend it is this IST, e.g. \"2026-10-19 10:15\"")
+    ap.add_argument("--now", help="pretend it is this IST, e.g. \"2026-11-23 11:40\"")
     ap.add_argument("--write", nargs="?", const="trader/orders.json", metavar="PATH",
                     help="write the proposed order (default trader/orders.json)")
     ap.add_argument("--json", action="store_true", help="print JSON instead of the report")
     g = ap.add_argument_group("weights mode (split a budget across a list)")
-    g.add_argument("--weights", help="inline weights: AAPL=22.04,AXP=17.14")
+    g.add_argument("--weights", help="inline weights: RELIANCE=30,HDFCBANK=25")
     g.add_argument("--targets", help="a weights file: {\"weights\": [{\"ticker\", \"weight\"}]}")
     g.add_argument("--top", type=int, help="keep only the N biggest weights")
     g.add_argument("--whole-shares", action="store_true", help="whole shares only (needs --prices)")
-    g.add_argument("--cents", action="store_true", help="size to the cent instead of whole dollars")
+    g.add_argument("--cents", action="store_true", help="size to the paisa instead of whole rupees")
     a = ap.parse_args(argv)
     try:
         cfg = load_config(a.config)
