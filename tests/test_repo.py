@@ -56,6 +56,8 @@ class Repo(unittest.TestCase):
             self.assertIn("name: %s\n" % s, fm + "\n", s)
             self.assertRegex(fm, r"description: ", s)
             self.assertGreater(len(fm), 200, "%s description is too thin" % s)
+            desc = " ".join(l.strip() for l in fm.split("description: >-", 1)[-1].split("\nargument-hint")[0].splitlines())
+            self.assertLessEqual(len(desc.strip()), 1024, "%s description is over the 1024 limit" % s)
             self.assertGreater(len(text.splitlines()), 60, s)
 
     def test_order_path_skills_carry_the_safety_block(self):

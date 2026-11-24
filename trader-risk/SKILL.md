@@ -1,22 +1,17 @@
 ---
 name: trader-risk
 description: >-
-  Risk Manager for NSE day trades on Kite. Checks every trade against your
-  limits and stops anything over them, before it can reach Kite. For a day
-  trade: a stop is required, the loss at the stop plus Zerodha's charges
-  must fit your max loss per trade (measured from the higher of the plan's
-  entry and a fresh price), reward:risk must meet your minimum, the day's
-  total risk must fit your daily loss limit, no more than your trades per
-  day, no new entries outside 9:30 to 14:45 IST or on an NSE holiday, every
-  price on the NSE tick, and the stop and the target inside today's circuit
-  band. It also keeps the basics: blocked symbols, order size, position cap,
-  cash buffer, margin, short sales, F&O, Kite's order formats, duplicates
-  and a daily order limit. Getting out is never blocked by a day limit.
-  Prints PASS or BLOCK with the reason and records the verdicts so
-  trader-broker only shows an order that passed. Use when the user says
-  "check my order", "is this safe", "risk check", "does this break my
-  rules", "can I take this trade", "how much have I risked today", or before
-  /trader-broker, always.
+  Risk Manager for NSE day trades on Kite. Checks every order against your
+  limits and blocks anything over them before it can reach Kite: a stop is
+  required, the loss at the stop plus Zerodha's charges must fit your max
+  loss per trade, reward:risk must meet your minimum, the day's risk must
+  fit your daily loss limit and trade count, no entries outside 9:30 to
+  14:45 IST or on an NSE holiday, prices on the NSE tick, and the stop and
+  target inside today's circuit band. Also checks blocked symbols, order
+  size, position cap, cash, margin, shorts, F&O and duplicates. Getting out
+  is never blocked. Prints PASS or BLOCK with the reason. Use when the user
+  says "check my order", "is this safe", "risk check", "can I take this
+  trade", "how much have I risked today", or before /trader-broker, always.
 argument-hint: "[path to orders.json]"
 ---
 
