@@ -2,9 +2,10 @@
 name: trader-news
 description: >-
   News Monitor. Tracks breaking news on every NSE stock you watch or hold and
-  flags what moves it: Yahoo Finance India headlines per symbol, Google News
-  India searched for the symbol and company, and how far each stock is from
-  yesterday's close. Shows only what is new since the last check, newest
+  flags what moves it: NSE's own corporate filing feeds (announcements,
+  board meetings, corporate actions, results), Yahoo Finance India
+  headlines, Google News India, and how far each stock is from yesterday's
+  close. Shows only what is new since the last check, newest
   first, in IST, tags each item (earnings, board meeting, analyst, deal,
   bonus/split, SEBI, circuit, F&O ban, RBI, FII, macro...) and never repeats
   one. Use when the user says "any news on RELIANCE", "why is this moving",
@@ -18,8 +19,8 @@ argument-hint: "[symbols]"
 
 A chart can look perfect and still be about to gap on a results date, a
 board meeting, a block deal or a SEBI order. Before a setup becomes a trade,
-this skill reads two Indian news feeds for every stock on the watchlist, and
-tells you only what is new. It also prints how far each stock has moved
+this skill reads NSE's own filing feeds and two Indian news feeds for every
+stock on the watchlist, and tells you only what is new. It also prints how far each stock has moved
 today, so a headline and a move sit side by side.
 
 Tool in this folder (standard library Python, no keys):
@@ -27,7 +28,8 @@ Tool in this folder (standard library Python, no keys):
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/news.py"                         # watchlist + plan + portfolio
 python3 "${CLAUDE_SKILL_DIR}/news.py" --tickers RELIANCE TITAN --hours 12
-python3 "${CLAUDE_SKILL_DIR}/news.py" --no-google --json
+python3 "${CLAUDE_SKILL_DIR}/news.py" --tickers MARKSANS="Marksans Pharma" --nse-feeds announcements,board
+python3 "${CLAUDE_SKILL_DIR}/news.py" --no-google --no-nse --json
 ```
 
 ## What it reads and writes
@@ -37,16 +39,27 @@ python3 "${CLAUDE_SKILL_DIR}/news.py" --no-google --json
 | `--tickers`, else `trader/watchlist.json` | the scanner's hits (trader-scanner) |
 | `trader/plan.json` | the trade you are planning (trader-exit) |
 | `trader/portfolio.json` | what you hold (trader-broker records fills there) |
+| NSE filing RSS (4 feeds, one request each) | `https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml`, `Board_Meetings.xml`, `Corporate_action.xml`, `Financial_Results.xml` (`--no-nse` to skip, `--nse-feeds` to pick) |
+| `trader/universe.txt` | `SYMBOL|Name` lines from trader-scanner, to match filings by company name |
 | Yahoo Finance headline RSS, India | `https://feeds.finance.yahoo.com/rss/2.0/headline?s=TITAN.NS&region=IN&lang=en-IN` |
 | Google News RSS, India | `https://news.google.com/rss/search?q=...&hl=en-IN&gl=IN&ceid=IN:en` (`--no-google` to skip) |
 | Yahoo Finance chart endpoint | the last price against yesterday's close for `<SYMBOL>.NS` (unofficial, can lag) |
-| `trader/state/news.json` | what has been shown (kept 30 days) |
+| `trader/state/news.json` | what has been shown (kept 30 days), and company names learned from filings |
 
-Company filings (results, board meetings, corporate actions) are posted on
-NSE and BSE under "Corporate announcements". Those sites block scripts, so
-the tool tags headlines that mention them, and Claude can open
-nseindia.com or bseindia.com in a browser when one matters. For a live
-price, use a Kite `market` quote instead of the Yahoo move line.
+**NSE filings.** NSE publishes every company's filings as RSS. The tool
+fetches each feed once for all your symbols and keeps a filing when its
+file name starts with your symbol (`MARKSANS_23112026181502_...pdf`) or its
+company name matches yours. The corporate action and results feeds give the
+company name only, so the name comes from `--tickers SYMBOL="Company Name"`,
+`trader/universe.txt`, or an earlier filing that carried the symbol (the
+tool remembers it). When a symbol shows no filings and you expected some,
+pass its name. Filings that can gap a stock (results, board meetings,
+dividends, bonus, splits, buybacks, insolvency, regulatory approvals) are
+marked `!`. Open the linked PDF before telling the user what it says. If NSE
+refuses the request, the check prints a note and the other sources still
+run; Claude can then read the feed with its own web fetch. BSE filings are
+not covered. For a live price, use a Kite `market` quote instead of the
+Yahoo move line.
 
 ## The rules
 
@@ -54,7 +67,8 @@ price, use a Kite `market` quote instead of the Yahoo move line.
   happened, open the story or the exchange filing and read it. Quote the
   source and link it. Never summarise a paywalled story you could not read:
   say so.
-- **Exchange filings beat headlines.** If an NSE or BSE announcement and a
+- **Exchange filings beat headlines.** NSE filings show with the source
+  `NSE filing`. If an NSE or BSE announcement and a
   headline disagree, the filing is what the company told the exchange.
 - **Say what it touches.** Every item lists the symbols it touches and its
   tags: earnings, board, analyst, legal (SEBI, NCLT), deal, capital (bonus,
@@ -71,8 +85,8 @@ price, use a Kite `market` quote instead of the Yahoo move line.
 1. Run the check: `python3 "${CLAUDE_SKILL_DIR}/news.py"`. Exit code 1 means
    nothing new. `--all` shows items already seen, `--json` gives everything
    machine readable, `--dry-run` leaves the state alone.
-2. Read the items that matter first: anything tagged earnings, board, halt,
-   legal, regulatory or risk, and every MOVING symbol.
+2. Read the items that matter first: every `!` NSE filing, anything tagged
+   earnings, board, halt, legal, regulatory or risk, and every MOVING symbol.
 3. Write a short brief, per symbol: what happened, the source and link, the
    move, and one line on why it matters to the setup (for example "the board
    meets on results this week: the stock can gap at 9:15, past any stop").

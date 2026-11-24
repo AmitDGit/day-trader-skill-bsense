@@ -128,5 +128,72 @@ class News(unittest.TestCase):
         self.assertEqual(news.google_query("TITAN", "Titan Company"), "%22Titan+Company%22+NSE")
 
 
+NSE_DIR = os.path.join(FIX, "nse")
+
+
+class NseFeeds(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.state = os.path.join(self.tmp, "news.json")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def run_news(self, *tickers, extra=()):
+        return run(news, ["--tickers"] + list(tickers) + ["--offline", NSE_DIR, "--state", self.state,
+                          "--no-moves", "--no-google", "--universe", os.path.join(self.tmp, "none.txt"),
+                          "--now", "2026-11-24T15:00:00Z", "--hours", "72", "--json"] + list(extra))
+
+    def test_filings_matched_by_symbol_then_learned_name(self):
+        code, out, err = self.run_news("MARKSANS")
+        self.assertEqual(code, 0, err)
+        items = json.loads(out)["items"]
+        self.assertEqual([(i["source"], i["ticker"], i["feed"]) for i in items],
+                         [("NSE filing", "MARKSANS", "actions"), ("NSE filing", "MARKSANS", "announcements")])
+        board = items[1]
+        self.assertEqual(board["title"], "Marksans Pharma Limited: Board Meeting Intimation")
+        self.assertTrue(board["important"])
+        self.assertIn("board", board["tags"])
+        self.assertIn("capital", board["tags"])                       # buyback
+        self.assertEqual(board["time"], "2026-11-23T12:45:02+00:00")   # 18:15:02 IST
+        # the corporate action names the company only; the name was learned from the filing above
+        self.assertIn("INTERIM DIVIDEND", items[0]["summary"])
+        with open(self.state) as fh:
+            self.assertEqual(json.load(fh)["nse_names"], {"marksans pharma": "MARKSANS"})
+
+    def test_name_given_on_the_command_line(self):
+        code, out, err = self.run_news('MARKSANS=Marksans Pharma Ltd.', extra=("--nse-feeds", "actions"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual([i["ticker"] for i in json.loads(out)["items"]], ["MARKSANS"])
+
+    def test_other_companies_are_left_out(self):
+        code, out, _ = self.run_news("TITAN")
+        self.assertEqual((code, json.loads(out)["items"]), (1, []))
+        code, out, _ = self.run_news("BLISSGVS", "MARKSANS", extra=("--dry-run",))
+        self.assertEqual(sorted({i["ticker"] for i in json.loads(out)["items"]}), ["BLISSGVS", "MARKSANS"])
+        bliss = [i for i in json.loads(out)["items"] if i["ticker"] == "BLISSGVS"][0]
+        self.assertIn("regulatory", bliss["tags"])
+        self.assertNotIn("halt", bliss["tags"])  # "suspension of key licenses" is not a trading halt
+
+    def test_filings_show_once_and_can_be_switched_off(self):
+        self.run_news("MARKSANS")
+        code, out, _ = self.run_news("MARKSANS")
+        self.assertEqual(code, 1)
+        code, out, _ = self.run_news("MARKSANS", extra=("--no-nse", "--all"))
+        self.assertEqual(json.loads(out)["items"], [])
+        code, _, err = self.run_news("MARKSANS", extra=("--nse-feeds", "gossip"))
+        self.assertEqual(code, 2)
+        self.assertIn("unknown NSE feed gossip", err)
+
+    def test_nse_helpers(self):
+        self.assertEqual(news.NSE_RSS % news.NSE_FEEDS["announcements"],
+                         "https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml")
+        self.assertEqual(news.norm_name("MARKSANS PHARMA LIMITED"), news.norm_name("Marksans Pharma Ltd."))
+        self.assertEqual(news.norm_name("Mahindra & Mahindra Ltd."), "mahindra and mahindra")
+        self.assertEqual(news.parse_nse_time("24-Nov-2026 20:06:37").isoformat(), "2026-11-24T14:36:37+00:00")
+        m = news.CORP_LINK.search("https://nsearchives.nseindia.com/corporate/M&M_24112026200606_x.pdf")
+        self.assertEqual(m.group(1), "M&M")
+
+
 if __name__ == "__main__":
     unittest.main()

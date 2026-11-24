@@ -8,14 +8,28 @@ today and a flag on anything that touches your symbols.
     python3 news.py                                  # watchlist + plan + portfolio symbols
     python3 news.py --tickers RELIANCE HDFCBANK INFY
     python3 news.py --tickers RELIANCE --all --hours 72  # everything in the last 3 days, seen or not
-    python3 news.py --no-google                      # Yahoo headlines only
+    python3 news.py --no-google                      # no Google News
+    python3 news.py --tickers MARKSANS="Marksans Pharma" --nse-feeds announcements,board
     python3 news.py --no-moves                       # skip the price line per symbol
 
 Your symbols, when --tickers is not given: every hit in trader/watchlist.json
 (trader-scanner), the symbol in trader/plan.json (trader-exit) and the
 positions in trader/portfolio.json.
 
-Sources, one request each per symbol:
+Sources:
+  - NSE's own corporate filing feeds, one request each for all your symbols
+    (nseindia.com/rss-feed): announcements, board meetings, corporate actions
+    and financial results, at
+    https://nsearchives.nseindia.com/content/RSS/<Online_announcements|Board_Meetings|Corporate_action|Financial_Results>.xml
+    A filing is yours when its file name starts with your symbol
+    (MARKSANS_13112026142026_...pdf) or its company name matches yours. Names
+    come from --tickers MARKSANS="Marksans Pharma", trader/universe.txt
+    (trader-scanner universe) or an earlier filing, remembered in the state.
+    Filings that can gap a stock (results, board meetings, dividends, bonus,
+    splits, buybacks, insolvency, regulatory approvals) are marked "!".
+    --no-nse skips them; --nse-feeds announcements,board picks some.
+
+One request each per symbol:
   - Yahoo Finance headline RSS, India edition, for SYMBOL.NS:
     https://feeds.finance.yahoo.com/rss/2.0/headline?s=<SYMBOL>.NS&region=IN&lang=en-IN
   - Google News RSS, India edition, searched for the symbol (and the company
@@ -26,13 +40,15 @@ Sources, one request each per symbol:
     https://query2.finance.yahoo.com/v8/finance/chart/<SYMBOL>.NS?range=1d&interval=5m
     For a live price ask Claude for a Kite quote instead.
 
-Results, board meetings and corporate actions are filed with NSE and BSE
-(nseindia.com, bseindia.com, "Corporate announcements"); those sites block
-scripts, so this tool tags the headlines that mention them instead.
+NSE's main website blocks scripts, but its RSS feeds on nsearchives are
+public. If they refuse a request (NSE sometimes does from cloud servers),
+the check says so in a note and the other sources still run. BSE filings are
+not covered.
 
 Times print in IST (UTC+05:30). State: trader/state/news.json remembers
 what you have seen (30 days), so an item shows once. Offline: --offline DIR
-reads yahoo-<SYMBOL>.xml, google-<SYMBOL>.xml and chart-<SYMBOL>.json from DIR.
+reads yahoo-<SYMBOL>.xml, google-<SYMBOL>.xml, chart-<SYMBOL>.json and
+nse-<feed>.xml from DIR.
 The tests use it.
 
 Headlines are leads, not facts: open the story before acting, and treat
@@ -58,6 +74,19 @@ YAHOO = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%s&region=IN&lang=en
 GOOGLE = "https://news.google.com/rss/search?q=%s&hl=en-IN&gl=IN&ceid=IN:en"
 CHART = "https://%s.finance.yahoo.com/v8/finance/chart/%s?range=1d&interval=5m"
 BROWSER_UA = "Mozilla/5.0 (compatible; day-trader-skill/2.0; +https://github.com/Jakeschincariol/day-trader-skill)"
+NSE_RSS = "https://nsearchives.nseindia.com/content/RSS/%s"
+NSE_FEEDS = {  # NSE's own RSS feeds (nseindia.com/rss-feed); one request each, for every symbol at once
+    "announcements": "Online_announcements.xml",
+    "board": "Board_Meetings.xml",
+    "actions": "Corporate_action.xml",
+    "results": "Financial_Results.xml",
+}
+NSE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+# filings worth a "!": the ones that can gap a stock
+NSE_IMPORTANT = re.compile(
+    r"financial results?|outcome of board meeting|board meeting|dividend|bonus|split|sub-division|buy ?back"
+    r"|rights|insolvency|suspension|delist|fraud|default|credit rating|resignation|acquisition|amalgamation"
+    r"|scheme of arrangement|regulatory approvals?|USFDA|warning letter|import alert", re.I)
 KEEP_DAYS = 30
 MOVE_PCT = 3.0  # a stock this far from yesterday's close is flagged as moving
 
@@ -73,7 +102,7 @@ ITEMS_8K = {
     "7.01": "Regulation FD disclosure", "8.01": "other events", "9.01": "exhibits",
 }
 KEYWORDS = [
-    ("earnings", r"\bearnings\b|\bresults\b|\bQ[1-4]\b|\bprofit\b|\bPAT\b|\bEBITDA\b|\brevenue\b|\bguidance\b"),
+    ("earnings", r"\bearnings\b|\bresults?\b|\bQ[1-4]\b|\bprofit\b|\bPAT\b|\bEBITDA\b|\brevenue\b|\bguidance\b"),
     ("board", r"\bboard meeting\b|\bboard approves\b|\bAGM\b|\bEGM\b|\bpostal ballot\b"),
     ("analyst", r"\bupgrade[sd]?\b|\bdowngrade[sd]?\b|\btarget price\b|price target|\bbuy call\b|\bsell call\b"
                 r"|\boutperform\b|\bunderperform\b|\boverweight\b|\bunderweight\b"),
@@ -84,8 +113,8 @@ KEYWORDS = [
                 r"|\bOFS\b|\bIPO\b|\bblock deal\b|\bbulk deal\b|\bpledge"),
     ("people", r"\bCEO\b|\bCFO\b|\bMD\b|\bresign|\bsteps down\b|\bappoint"),
     ("risk", r"\bdefault\b|\binsolven|\bdowngrade by\b|\bfraud\b|\bdelist|\bhack|\bbreach\b|\boutage\b"),
-    ("halt", r"\bupper circuit\b|\blower circuit\b|\bcircuit\b|\bsuspen|\bF&O ban\b|\bban period\b"),
-    ("regulatory", r"\bUSFDA\b|\bFDA\b|\bRBI\b|\bTRAI\b|\bapproval\b|\blicen[cs]e\b|\bPLI\b"),
+    ("halt", r"\bupper circuit\b|\blower circuit\b|\bcircuit\b|\bsuspen(?:ded|sion)\b(?!/| of key)|\bF&O ban\b|\bban period\b"),
+    ("regulatory", r"\bUSFDA\b|\bFDA\b|\bRBI\b|\bTRAI\b|\bapprovals?\b|\blicen[cs]es?\b|\bPLI\b"),
     ("macro", r"\bRBI policy\b|\brepo rate\b|\bMPC\b|\bCPI\b|\binflation\b|\bGDP\b|\bbudget\b|\bFII\b|\bFPI\b"
               r"|\bDII\b|\bcrude\b|\brupee\b|\btariffs?\b|\bGIFT Nifty\b"),
 ]
@@ -137,7 +166,7 @@ class Fetcher(object):
         self.pause = pause
         self._last = 0.0
 
-    def get(self, url, name):
+    def get(self, url, name, ua=None):
         if self.offline:
             path = os.path.join(self.offline, name)
             if not os.path.isfile(path):
@@ -148,7 +177,7 @@ class Fetcher(object):
         if gap < self.pause:
             time.sleep(self.pause - gap)
         self._last = time.time()
-        headers = {"User-Agent": BROWSER_UA, "Accept-Encoding": "gzip"}
+        headers = {"User-Agent": ua or BROWSER_UA, "Accept-Encoding": "gzip"}
         req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
@@ -262,6 +291,94 @@ def parse_google(data, ticker):
     return out
 
 
+CORP_LINK = re.compile(r"/corporate/(?:xbrl/)?([A-Z0-9&\-]{1,20})_\d{8,14}_")
+NAME_NOISE = re.compile(r"\b(?:limited|ltd|the|india|co|company|corporation|corp|inc)\b\.?", re.I)
+
+
+def norm_name(name):
+    """"Marksans Pharma Ltd." and "MARKSANS PHARMA LIMITED" -> "marksans pharma"."""
+    n = (name or "").replace("&", " and ")
+    n = NAME_NOISE.sub(" ", n)
+    return " ".join(re.sub(r"[^a-z0-9 ]+", " ", n.lower()).split())
+
+
+def parse_nse_time(value):
+    """NSE's pubDate is "24-Nov-2026 20:06:37", IST with no zone; RFC 822 also accepted."""
+    value = (value or "").strip()
+    for fmt in ("%d-%b-%Y %H:%M:%S", "%d-%b-%Y %H:%M", "%d-%b-%Y"):
+        try:
+            d = _dt.datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+        return (d - _dt.timedelta(hours=5, minutes=30)).replace(tzinfo=_dt.timezone.utc)
+    return parse_time(value)
+
+
+def parse_nse(data, feed):
+    """One NSE RSS feed -> filings, not yet matched to your symbols. Each item's
+    <title> is the company name, <description> the filing with "|SUBJECT: ..." and
+    <link> the PDF or XBRL file, whose name starts with the NSE symbol when it is
+    a company upload (MARKSANS_13112026142026_SEIntimation.pdf)."""
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as exc:
+        raise NewsError("NSE %s feed is not valid XML: %s" % (feed, exc))
+    out = []
+    for it in root.iter("item"):
+        company = " ".join(_text(it, "title").split())
+        desc = " ".join(_text(it, "description").split())
+        link = _text(it, "link")
+        subject = ""
+        if "|SUBJECT:" in desc:
+            desc, subject = [x.strip() for x in desc.split("|SUBJECT:", 1)]
+        m = CORP_LINK.search(link)
+        headline = subject or desc[:120]
+        out.append({"id": "nse:%s:%s:%s:%s" % (feed, company, link, _text(it, "pubDate")),
+                    "source": "NSE filing", "kind": "filing", "feed": feed, "company": company,
+                    "link_symbol": m.group(1) if m else None, "ticker": None,
+                    "title": ("%s: %s" % (company, headline)) if headline else company,
+                    "summary": desc, "link": link, "time": parse_nse_time(_text(it, "pubDate")),
+                    "important": bool(NSE_IMPORTANT.search("%s %s" % (subject, desc)))})
+    return out
+
+
+def match_nse(filings, watch, learned=None):
+    """Keep the filings that belong to your symbols: by the symbol in the file
+    name first, then by the company name (from the watchlist, the universe file,
+    --tickers SYM="Name", or learned from an earlier filing with the symbol)."""
+    learned = {} if learned is None else learned
+    by_name = {}
+    for t, name in watch.items():
+        if name and norm_name(name):
+            by_name[norm_name(name)] = t
+    for n, t in learned.items():
+        if t in watch:
+            by_name.setdefault(n, t)
+    out = []
+    for f in filings:
+        t = f["link_symbol"] if f["link_symbol"] in watch else by_name.get(norm_name(f["company"]))
+        if not t:
+            continue
+        if f["link_symbol"] == t and norm_name(f["company"]):
+            learned[norm_name(f["company"])] = t  # so the corporate action and results feeds match later
+        f = dict(f, ticker=t)
+        out.append(f)
+    return out
+
+
+def universe_names(path="trader/universe.txt"):
+    """SYMBOL|Name lines written by trader-scanner universe -> {SYMBOL: name}."""
+    out = {}
+    if path and os.path.isfile(path):
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                if "|" in line:
+                    sym, name = line.strip().split("|", 1)
+                    if sym and name:
+                        out[sym.strip().upper()] = name.strip()
+    return out
+
+
 def parse_chart(data, ticker):
     """Yahoo chart JSON -> {"ticker", "price", "prev_close", "pct", "time"} or raise."""
     try:
@@ -351,9 +468,28 @@ def fingerprint(it):
 
 # ---------------------------------------------------------------- the check
 
-def collect(fetcher, watch, state, google=True, errors=None):
+def collect_nse(fetcher, watch, state, feeds=None, errors=None):
+    """NSE's announcement feeds, fetched once each and filtered to your symbols."""
+    errors = [] if errors is None else errors
+    learned = state.setdefault("nse_names", {})
+    items = []
+    for feed in (feeds or list(NSE_FEEDS)):
+        try:
+            filings = parse_nse(fetcher.get(NSE_RSS % NSE_FEEDS[feed], "nse-%s.xml" % feed,
+                                            ua=NSE_UA), feed)
+        except NewsError as exc:
+            if not (fetcher.offline and "no file" in str(exc)):
+                errors.append("NSE %s feed: %s" % (feed, exc))
+            continue
+        items += match_nse(filings, watch, learned)
+    return items
+
+
+def collect(fetcher, watch, state, google=True, errors=None, nse_feeds=None):
     errors = [] if errors is None else errors
     items = []
+    if nse_feeds != []:
+        items += collect_nse(fetcher, watch, state, nse_feeds, errors)
     for t in sorted(watch):
         try:
             items += parse_rss(fetcher.get(YAHOO % urllib.parse.quote(yahoo_symbol(t), safe="^."),
@@ -450,7 +586,12 @@ def main(argv=None):
     ap.add_argument("--state", default="trader/state/news.json")
     ap.add_argument("--hours", type=float, default=48, help="ignore items older than this")
     ap.add_argument("--all", action="store_true", help="show seen items too")
-    ap.add_argument("--no-google", action="store_true", help="Yahoo headlines only, no Google News")
+    ap.add_argument("--no-google", action="store_true", help="no Google News")
+    ap.add_argument("--no-nse", action="store_true", help="no NSE announcement feeds")
+    ap.add_argument("--nse-feeds", default=",".join(NSE_FEEDS),
+                    help="which NSE feeds, comma separated (default %(default)s)")
+    ap.add_argument("--universe", default="trader/universe.txt",
+                    help="SYMBOL|Name lines from trader-scanner, to match NSE filings by company name")
     ap.add_argument("--no-moves", action="store_true", help="skip the price line per ticker")
     ap.add_argument("--move-pct", type=float, default=MOVE_PCT, help="flag a move this big (percent)")
     ap.add_argument("--offline", metavar="DIR")
@@ -460,11 +601,16 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     if args.tickers:
-        watch = {plain_symbol(t): None for t in args.tickers}
+        watch = {}
+        for t in args.tickers:  # SYMBOL or SYMBOL=Company Name
+            sym, _, name = t.partition("=")
+            watch[plain_symbol(sym)] = name.strip() or None
         known = watch_from_files(args.portfolio, args.watchlist, args.plan)
-        watch.update({t: known[t] for t in watch if known.get(t)})
+        watch.update({t: known[t] for t in watch if known.get(t) and not watch[t]})
     else:
         watch = watch_from_files(args.portfolio, args.watchlist, args.plan)
+    names = universe_names(args.universe)
+    watch.update({t: names[t] for t in watch if not watch[t] and names.get(t)})
     if not watch:
         print("news: no tickers. Pass --tickers, or run /trader-scanner first (it writes "
               "trader/watchlist.json).", file=sys.stderr)
@@ -473,7 +619,13 @@ def main(argv=None):
     state = load_json(args.state) or {}
     errors = []
     fetcher = Fetcher(offline=args.offline)
-    items = collect(fetcher, watch, state, google=not args.no_google, errors=errors)
+    feeds = [] if args.no_nse else [f.strip() for f in args.nse_feeds.split(",") if f.strip()]
+    bad = [f for f in feeds if f not in NSE_FEEDS]
+    if bad:
+        print("news: unknown NSE feed %s (choose from %s)" % (", ".join(bad), ", ".join(NSE_FEEDS)),
+              file=sys.stderr)
+        return 2
+    items = collect(fetcher, watch, state, google=not args.no_google, errors=errors, nse_feeds=feeds)
     items = dedupe(tag(items, watch))
     shown = select(items, state, now, hours=args.hours, show_all=args.all)
     moves = [] if args.no_moves else collect_moves(fetcher, watch, errors)

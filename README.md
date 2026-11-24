@@ -22,7 +22,9 @@ every order. What changed is the market around it:
   max-loss figure.
 - **Kite tickets.** An MIS entry through Kite `orders`, then a two-leg GTT
   (stop and target, one cancels the other). Dry run by default.
-- **Indian news.** Yahoo Finance India and Google News India, tagged for
+- **Indian news.** NSE's own corporate filing feeds (announcements, board
+  meetings, corporate actions, results), Yahoo Finance India and Google News
+  India, tagged for
   results, board meetings, SEBI, circuits, F&O ban, RBI and FII flows.
 
 The US-only skills (the SEC earnings analyst and the Congress trade tracker)
@@ -71,7 +73,7 @@ is the second check for them.
 | command | job | what it does |
 | --- | --- | --- |
 | `/trader-scanner` | Chart Scanner | Scans the Nifty 100 (or 50 / 200 / 500) and your holdings for setups: opening-range breakouts, 20-day highs, oversold bounces. |
-| `/trader-news` | News Monitor | Tracks Indian market news on every stock you watch and flags what moves it. |
+| `/trader-news` | News Monitor | Tracks NSE filings and Indian market news on every stock you watch and flags what moves it. |
 | `/trader-entry` | Entry Timer | Watches a setup candle by candle and tells you the moment to get in. |
 | `/trader-exit` | Exit Planner | Sets your stop and your target on the NSE tick before you enter. |
 | `/trader-timemachine` | Time Machine | Replays the rest of the session 10,000 times from the stock's own last 60 days, plus every past time the setup fired. |

@@ -20,3 +20,12 @@ Sample files, written by hand in the shape of the real thing, not real data:
 
 The Time Machine and the daily scan are tested on generated, seeded sessions
 (see the tests), not on market data.
+
+## nse/
+
+`nse-announcements.xml`: the first four items (Centum, Delta Autocorp, Bliss GVS,
+DPSC) are copied verbatim from NSE's live Online_announcements.xml feed on
+24 November 2026. The Marksans Pharma item is synthetic, written in the same
+format. `nse-actions.xml` is synthetic, modelled on NSE's Corporate_action.xml
+items (the company name in <title>, no symbol in the link), to test matching by
+company name.
