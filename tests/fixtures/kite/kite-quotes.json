@@ -1,0 +1,33 @@
+{
+ "data": {
+  "NSE:RELIANCE": {
+   "instrument_token": 738561,
+   "timestamp": "1970-01-01T05:30:00+05:30",
+   "last_price": 1351,
+   "last_quantity": 1,
+   "last_trade_time": "2026-11-23T15:59:43+05:30",
+   "average_price": 0,
+   "volume": 0,
+   "buy_quantity": 0,
+   "sell_quantity": 0,
+   "ohlc": {
+    "open": 1381,
+    "high": 1390,
+    "low": 1346.9,
+    "close": 1351
+   },
+   "net_change": 0,
+   "oi": 0,
+   "oi_day_high": 0,
+   "oi_day_low": 0,
+   "lower_circuit_limit": 1215.9,
+   "upper_circuit_limit": 1486.1
+  }
+ },
+ "meta": {
+  "missing_instruments": [],
+  "partial": false,
+  "requested_count": 1,
+  "returned_count": 1
+ }
+}

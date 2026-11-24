@@ -1,18 +1,18 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "day-trader-skill",
-  "description": "The Day Trader skill pack for Claude: the Trader skill v2",
+  "name": "day-trader-skill-bsense",
+  "description": "The Day Trader skill pack for Claude, NSE and Kite edition",
   "owner": {
-    "name": "Jake Schincariol",
-    "url": "https://opusjake.ai"
+    "name": "AmitDGit",
+    "url": "https://github.com/AmitDGit"
   },
   "plugins": [
     {
-      "name": "day-trader-skill",
-      "description": "Eleven Claude skills for day trading: a chart scanner, a news monitor, an entry timer, an exit planner, a time machine that replays 10,000 sessions, a risk manager, a budget manager, an order executor (paper by default, never without your yes), price alerts, an earnings analyst and a Pelosi tracker.",
+      "name": "day-trader-skill-nse",
+      "description": "Nine Claude skills for intraday trading on NSE and BSE with Zerodha Kite: a Nifty chart scanner, an Indian news monitor, an entry timer, an exit planner on the NSE tick, a time machine that replays 10,000 sessions, a budget manager with Zerodha charges, a risk manager with circuit checks, a Kite order executor (dry run by default, never without your yes) and price alerts on the NSE clock.",
       "source": "./",
       "category": "productivity",
-      "homepage": "https://github.com/Jakeschincariol/day-trader-skill"
+      "homepage": "https://github.com/AmitDGit/day-trader-skill-bsense"
     }
   ]
 }

@@ -4,13 +4,13 @@ enter, so you know when to get out. Standard library only. Long side only.
 It never places an order.
 
     python3 exit.py plan                                    # from trader/entry.json: or-mid stop, 2R target
-    python3 exit.py plan --stop or-mid --target 1R --write  # the reel: stop 358.32, target 370.04
-    python3 exit.py plan --symbol TSLA --entry 364.18 --or-high 362.18 --or-low 354.47
-    python3 exit.py plan --stop atr:1.5 --offline TSLA.json # ATR needs the session's bars
-    python3 exit.py plan --symbol NVDA --entry 190.25 --setup level --stop pct:1
+    python3 exit.py plan --stop pct:0.5 --write             # TITAN: stop 4650.6, target 4720.8
+    python3 exit.py plan --symbol TITAN --entry 4674.0 --or-high 4678.1 --or-low 4615.3
+    python3 exit.py plan --stop atr:2 --offline trader/data/TITAN-5minute.json  # ATR needs the session's candles
+    python3 exit.py plan --symbol RELIANCE --entry 1352.0 --setup level --stop pct:1
     python3 exit.py show                                    # the current trader/plan.json
 
-Stops (a long's stop rounds DOWN to the cent, away from the entry):
+Stops (a long's stop rounds DOWN onto the NSE tick, away from the entry):
   or-mid     the opening-range midpoint (the default for an orb entry)
   or-low     the opening-range low
   price:X    your price
@@ -20,7 +20,7 @@ Stops (a long's stop rounds DOWN to the cent, away from the entry):
              bars by then it averages all of them and says so.
   A level setup has no opening-range default: give a stop.
 
-Targets (round half up to the cent):
+Targets (round half up onto the NSE tick):
   2R (default), 1R, 1.5R ...   entry + R x risk, where risk = entry - stop
   price:X                      your price
 
@@ -29,8 +29,13 @@ it, a risk under 0.05% of the price (too tight to survive the spread), an
 entry.json that has not triggered (unless you give --entry), a short (v2
 plans longs only).
 
-flat_by (default 15:55, or "flat_by" in trader/config.json): out by then, win
-or lose. On a 1:00 p.m. early close it moves up with the close (12:55).
+flat_by (default 15:10, or "flat_by" in trader/config.json): out by then, win
+or lose, ahead of Zerodha's MIS auto square-off at about 15:20.
+
+Ticks: NSE prices move in ticks by price band (0.01 under Rs 250, 0.05 to
+Rs 1,000, 0.10 to Rs 5,000, 0.50 to Rs 10,000, 1 to Rs 20,000, 5 above).
+"tick_size" in trader/config.json (a number, or {"SYMBOL": tick}) overrides
+the table, for example with the tick_size the Kite instrument search shows.
 "min_reward_risk" in the config (default 1.0) only warns here; trader-risk
 enforces it.
 
@@ -47,6 +52,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
 
@@ -54,42 +60,35 @@ UA = "Mozilla/5.0 (compatible; day-trader-skill/2.0; +https://github.com/Jakesch
 BACKOFF = 5.0
 HOSTS = ("query2", "query1")
 INTERVALS = {"1m": 60, "5m": 300}
-DEFAULTS = {"flat_by": "15:55", "min_reward_risk": 1.0}
+DEFAULTS = {"flat_by": "15:10", "min_reward_risk": 1.0}
 ATR_BARS = 14
 MIN_RISK_PCT = Decimal("0.05")     # risk under 0.05% of the price is inside the spread's noise
 CENT = Decimal("0.01")
 EPOCH = datetime.datetime(1970, 1, 1)
 NOTE = "A stop is a plan, not a guarantee: a gap or a fast market can fill past it."
 
-NYSE_HOLIDAYS = {
-    "2026-01-01": "New Year's Day",
-    "2026-01-19": "Martin Luther King, Jr. Day",
-    "2026-02-16": "Washington's Birthday",
+NSE_HOLIDAYS = {  # equity segment, NSE circular for 2026 (2027 not yet published)
+    "2026-01-15": "Maharashtra municipal elections",
+    "2026-01-26": "Republic Day",
+    "2026-03-03": "Holi",
+    "2026-03-26": "Shri Ram Navami",
+    "2026-03-31": "Shri Mahavir Jayanti",
     "2026-04-03": "Good Friday",
-    "2026-05-25": "Memorial Day",
-    "2026-06-19": "Juneteenth National Independence Day",
-    "2026-07-03": "Independence Day (observed)",
-    "2026-09-07": "Labor Day",
-    "2026-11-26": "Thanksgiving Day",
-    "2026-12-25": "Christmas Day",
-    "2027-01-01": "New Year's Day",
-    "2027-01-18": "Martin Luther King, Jr. Day",
-    "2027-02-15": "Washington's Birthday",
-    "2027-03-26": "Good Friday",
-    "2027-05-31": "Memorial Day",
-    "2027-06-18": "Juneteenth National Independence Day (observed)",
-    "2027-07-05": "Independence Day (observed)",
-    "2027-09-06": "Labor Day",
-    "2027-11-25": "Thanksgiving Day",
-    "2027-12-24": "Christmas Day (observed)",
+    "2026-04-14": "Dr. Baba Saheb Ambedkar Jayanti",
+    "2026-05-01": "Maharashtra Day",
+    "2026-05-28": "Bakri Id",
+    "2026-06-26": "Muharram",
+    "2026-09-14": "Ganesh Chaturthi",
+    "2026-10-02": "Mahatma Gandhi Jayanti",
+    "2026-10-20": "Dussehra",
+    "2026-11-10": "Diwali Balipratipada",
+    "2026-11-24": "Prakash Gurpurb Sri Guru Nanak Dev",
+    "2026-12-25": "Christmas",
 }
-NYSE_EARLY_CLOSE = {  # 1:00 p.m. ET
-    "2026-11-27": "day after Thanksgiving",
-    "2026-12-24": "Christmas Eve",
-    "2027-11-26": "day after Thanksgiving",
-}
-OPEN = datetime.time(9, 30)
-CLOSE = datetime.time(16, 0)
+NSE_EARLY_CLOSE = {}  # NSE has no scheduled early closes; Muhurat trading is a separate evening session
+CALENDAR_YEARS = (2026,)
+OPEN = datetime.time(9, 15)
+CLOSE = datetime.time(15, 30)
 EARLY = datetime.time(13, 0)
 
 
@@ -99,31 +98,13 @@ class PlanError(Exception):
 
 # ---------------------------------------------------------------- time
 
-def _nth_sunday(year, month, n):
-    d = datetime.date(year, month, 1)
-    d += datetime.timedelta(days=(6 - d.weekday()) % 7)
-    return d + datetime.timedelta(weeks=n - 1)
+def to_ist(utc):
+    """naive UTC -> naive IST. India Standard Time is UTC+05:30 all year (no daylight saving)."""
+    return utc.replace(tzinfo=None) + datetime.timedelta(hours=5, minutes=30)
 
 
-def eastern_offset(utc):
-    """Hours from UTC for New York: -4 in daylight time, -5 otherwise (US rule since 2007)."""
-    y = utc.year
-    start = datetime.datetime.combine(_nth_sunday(y, 3, 2), datetime.time(7, 0))   # 2:00 EST
-    end = datetime.datetime.combine(_nth_sunday(y, 11, 1), datetime.time(6, 0))    # 2:00 EDT
-    naive = utc.replace(tzinfo=None)
-    return -4 if start <= naive < end else -5
-
-
-def to_eastern(utc):
-    return utc.replace(tzinfo=None) + datetime.timedelta(hours=eastern_offset(utc))
-
-
-def eastern_to_utc(local):
-    for off in (-4, -5):
-        utc = local - datetime.timedelta(hours=off)
-        if eastern_offset(utc) == off:
-            return utc
-    return local + datetime.timedelta(hours=5)
+def ist_to_utc(local):
+    return local - datetime.timedelta(hours=5, minutes=30)
 
 
 def utc_now():
@@ -135,28 +116,28 @@ def utc_of(ts):
 
 
 def parse_now(text):
-    """--now -> naive UTC. A time without an offset is New York time."""
+    """--now -> naive UTC. A time without an offset is IST."""
     if not text:
         return utc_now()
     t = text.strip()
-    if t.upper().endswith(" ET"):
-        t = t[:-3].strip()
+    if t.upper().endswith(" IST"):
+        t = t[:-4].strip()
     if re.match(r"^\d{1,2}:\d{2}$", t):
-        t = "%s %s" % (to_eastern(utc_now()).date().isoformat(), t.zfill(5))
+        t = "%s %s" % (to_ist(utc_now()).date().isoformat(), t.zfill(5))
     t = t.replace("Z", "+00:00")
     try:
         dt = datetime.datetime.fromisoformat(t)
     except ValueError:
-        raise PlanError('--now wants a New York time like "2026-10-19 10:15" (or ...Z for UTC)')
+        raise PlanError('--now wants an IST time like "2026-10-19 10:15" (or ...Z for UTC)')
     if dt.tzinfo is None:
-        return eastern_to_utc(dt)
+        return ist_to_utc(dt)
     return (dt - dt.utcoffset()).replace(tzinfo=None)
 
 
 def parse_hhmm(text, what):
     m = re.match(r"^\s*(\d{1,2}):(\d{2})\s*$", str(text))
     if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
-        raise PlanError("%s wants a New York time like 15:55, not %r" % (what, text))
+        raise PlanError("%s wants an IST time like 15:10, not %r" % (what, text))
     return datetime.time(int(m.group(1)), int(m.group(2)))
 
 
@@ -185,10 +166,10 @@ def ampm(t):
 
 
 def session(d):
-    """(open_time, close_time) in New York time, or None if closed all day."""
-    if d.weekday() >= 5 or d.isoformat() in NYSE_HOLIDAYS:
+    """(open_time, close_time) in IST, or None if closed all day."""
+    if d.weekday() >= 5 or d.isoformat() in NSE_HOLIDAYS:
         return None
-    return OPEN, (EARLY if d.isoformat() in NYSE_EARLY_CLOSE else CLOSE)
+    return OPEN, (EARLY if d.isoformat() in NSE_EARLY_CLOSE else CLOSE)
 
 
 # ---------------------------------------------------------------- money math (Decimal, to the cent)
@@ -197,7 +178,7 @@ def D(x, what="a number"):
     try:
         if isinstance(x, float):
             return Decimal(repr(x))
-        return Decimal(str(x).strip().lstrip("$").replace(",", ""))
+        return Decimal(str(x).strip().lstrip("$").replace("Rs", "").replace("\u20b9", "").strip().replace(",", ""))
     except (InvalidOperation, ValueError):
         raise PlanError("%s is not a number: %r" % (what, x))
 
@@ -212,8 +193,53 @@ def floor_cents(x):
     return D(x).quantize(CENT, rounding=ROUND_FLOOR)
 
 
+# NSE equity tick sizes by price band (NSE circular, effective 2025). Kite rejects
+# a price that is not a whole number of ticks. "tick_size" in the config wins.
+TICKS = ((Decimal("250"), Decimal("0.01")), (Decimal("1000"), Decimal("0.05")), (Decimal("5000"), Decimal("0.10")),
+         (Decimal("10000"), Decimal("0.50")), (Decimal("20000"), Decimal("1.00")), (None, Decimal("5.00")))
+
+
+def tick_for(price):
+    p = D(price)
+    for upper, tick in TICKS:
+        if upper is None or p < upper:
+            return tick
+    return Decimal("0.05")
+
+
+def to_tick(x, tick, rounding):
+    """A price onto the tick grid: ROUND_FLOOR for a long's stop, ROUND_HALF_UP for a target."""
+    t = D(tick)
+    return ((D(x) / t).quantize(Decimal(1), rounding=rounding) * t).quantize(CENT)
+
+
+def inr_group(digits):
+    """'1234567' -> '12,34,567': Indian grouping (thousands, then lakhs and crores)."""
+    if len(digits) <= 3:
+        return digits
+    head, tail = digits[:-3], digits[-3:]
+    parts = []
+    while len(head) > 2:
+        parts.insert(0, head[-2:])
+        head = head[:-2]
+    if head:
+        parts.insert(0, head)
+    return ",".join(parts) + "," + tail
+
+
+def inr(x, decimals=2, drop_zero_paise=False):
+    """Rupees: 123456.5 -> 'Rs 1,23,456.50'. ASCII on purpose, so it prints on any console."""
+    x = float(x)
+    sign = "-" if x < 0 else ""
+    s = ("%." + str(decimals) + "f") % abs(x)
+    whole, _, frac = s.partition(".")
+    if drop_zero_paise and frac and set(frac) == {"0"}:
+        frac = ""
+    return "%sRs %s%s" % (sign, inr_group(whole), "." + frac if frac else "")
+
+
 def money(x):
-    return "$%s" % format(D(x).quantize(CENT), ",f")
+    return inr(D(x).quantize(CENT))
 
 
 def num(x):
@@ -268,11 +294,12 @@ def r_label(r):
 
 
 def compute(entry, stop_rule, stop_param, target_rule, target_param, or_high=None, or_low=None,
-            atr=None, atr_bars=None):
-    """The stop, the target and the risk, in exact cents. Raises PlanError with the reason."""
+            atr=None, atr_bars=None, tick=None):
+    """The stop, the target and the risk, in exact paise, on the NSE tick grid
+    (tick=None: the price-band table). Raises PlanError with the reason."""
     e = cents(entry)
     if e <= 0:
-        raise PlanError("the entry price must be above $0")
+        raise PlanError("the entry price must be above Rs 0")
     detail = ""
     if stop_rule in ("or_mid", "or_low"):
         if or_high is None or or_low is None:
@@ -283,7 +310,7 @@ def compute(entry, stop_rule, stop_param, target_rule, target_param, or_high=Non
         if stop_rule == "or_mid":
             raw = (oh + ol) / 2
             label = "opening-range midpoint"
-            detail = "(%s + %s) / 2 = $%s" % (money(oh), money(ol), num(raw))
+            detail = "(%s + %s) / 2 = Rs %s" % (money(oh), money(ol), num(raw))
         else:
             raw, label = ol, "opening-range low"
     elif stop_rule == "price":
@@ -291,25 +318,28 @@ def compute(entry, stop_rule, stop_param, target_rule, target_param, or_high=Non
     elif stop_rule == "pct":
         raw = e * (1 - stop_param / 100)
         label = "%s%% under the entry" % num(stop_param)
-        detail = "%s x (1 - %s%%) = $%s" % (money(e), num(stop_param), num(raw))
+        detail = "%s x (1 - %s%%) = Rs %s" % (money(e), num(stop_param), num(raw))
     elif stop_rule == "atr":
         if atr is None:
             raise PlanError("an atr stop needs the session's bars")
         a = D(round(atr, 6))
         raw = e - stop_param * a
         label = "%s x ATR(%d) under the entry" % (num(stop_param), atr_bars)
-        detail = "ATR $%s over the %d bars to the entry%s" % (
+        detail = "ATR Rs %s over the %d bars to the entry%s" % (
             num(a.quantize(Decimal("0.0001"))), atr_bars, " (fewer than 14 so far)" if atr_bars < ATR_BARS else "")
     else:
         raise PlanError("unknown stop rule %r" % stop_rule)
-    stop = floor_cents(raw)
+    stop_tick = D(tick) if tick else tick_for(raw)
+    stop = to_tick(raw, stop_tick, ROUND_FLOOR)
     if stop != D(raw):
-        detail = (detail + ", rounded down" if detail else "$%s rounded down" % num(raw))
+        detail = (detail + ", rounded down" if detail else "Rs %s rounded down" % num(raw))
+        if stop_tick != CENT:
+            detail += " to the %s tick" % num(stop_tick)
     if stop >= e:
         raise PlanError("the stop %s (%s) is at or above the entry %s: a long's stop goes under the entry"
                         % (money(stop), label, money(e)))
     if stop <= 0:
-        raise PlanError("the stop works out to %s: pick a stop above $0" % money(stop))
+        raise PlanError("the stop works out to %s: pick a stop above Rs 0" % money(stop))
     risk = e - stop
     floor_risk = e * MIN_RISK_PCT / 100
     if risk < floor_risk:
@@ -317,10 +347,11 @@ def compute(entry, stop_rule, stop_param, target_rule, target_param, or_high=Non
                         "survive the spread, normal wiggle would stop you out. Widen it."
                         % (money(risk), money(floor_risk.quantize(CENT, rounding=ROUND_HALF_UP)), money(e)))
     if target_rule == "r":
-        target = cents(e + target_param * risk)
+        raw_t = e + target_param * risk
+        target = to_tick(raw_t, D(tick) if tick else tick_for(raw_t), ROUND_HALF_UP)
         t_label = r_label(target_param)
     else:
-        target = cents(target_param)
+        target = to_tick(target_param, D(tick) if tick else tick_for(target_param), ROUND_HALF_UP)
         t_label = None
     if target <= e:
         raise PlanError("the target %s is at or below the entry %s: a long's target goes above it"
@@ -390,14 +421,97 @@ def read_text(path):
         return fh.read()
 
 
+def yahoo_symbol(sym):
+    """An NSE symbol -> Yahoo's: RELIANCE -> RELIANCE.NS, NSE:M&M -> M&M.NS,
+    BSE:SBIN -> SBIN.BO. A symbol that already ends in .NS or .BO, or an
+    index like ^NSEI, stays as it is."""
+    s = str(sym).strip().upper()
+    if s.startswith("^") or s.endswith((".NS", ".BO")):
+        return s
+    if s.startswith("BSE:"):
+        return s[4:] + ".BO"
+    if s.startswith("NSE:"):
+        s = s[4:]
+    return s + ".NS"
+
+
+def plain_symbol(sym):
+    """Yahoo's or Kite's spelling -> the plain NSE symbol: RELIANCE.NS, NSE:RELIANCE -> RELIANCE."""
+    s = str(sym).strip().upper()
+    if s.startswith(("NSE:", "BSE:")):
+        s = s[4:]
+    for suf in (".NS", ".BO"):
+        if s.endswith(suf):
+            s = s[:-len(suf)]
+    return s
+
+
+# ---------------------------------------------------------------- Kite candles
+
+def _kite_ts(value):
+    """A Kite candle time ("2026-11-23T09:15:00+05:30", or the same with a space) -> Unix seconds."""
+    t = str(value).strip().replace(" ", "T", 1).replace("Z", "+00:00")
+    if re.search(r"[+-]\d{4}$", t):
+        t = t[:-2] + ":" + t[-2:]
+    dt = datetime.datetime.fromisoformat(t)
+    if dt.tzinfo is None:                       # Kite's times are IST
+        dt = dt.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
+    return int(dt.timestamp())
+
+
+def kite_chart(doc, sym=""):
+    """Kite historical candles -> the same shape as a Yahoo v8 chart, or None if
+    `doc` is not Kite's. Takes what the Kite connector's market tool returns
+    ({"data": [{"date", "open", "high", "low", "close", "volume"}, ...]}), the
+    Kite Connect API's {"data": {"candles": [[time, o, h, l, c, v], ...]}}, or a
+    bare list of either. "symbol" and "previous_close" at the top level are kept."""
+    if isinstance(doc, dict) and "chart" in doc:
+        return None
+    rows = doc
+    extra = {}
+    if isinstance(doc, dict):
+        extra = doc
+        rows = doc.get("data", doc.get("candles"))
+        if isinstance(rows, dict):
+            rows = rows.get("candles")
+    if not isinstance(rows, list) or not rows:
+        return None
+    t, o, h, l, c, v = [], [], [], [], [], []
+    for row in rows:
+        if isinstance(row, dict) and "date" in row and "close" in row:
+            vals = (row.get("date"), row.get("open"), row.get("high"), row.get("low"), row.get("close"),
+                    row.get("volume"))
+        elif isinstance(row, (list, tuple)) and len(row) >= 5:
+            vals = tuple(row[:6]) + (None,) * (6 - len(row[:6]))
+        else:
+            return None
+        try:
+            t.append(_kite_ts(vals[0]))
+        except (TypeError, ValueError):
+            return None
+        o.append(vals[1]); h.append(vals[2]); l.append(vals[3]); c.append(vals[4]); v.append(vals[5])
+    name = str(extra.get("symbol") or extra.get("tradingsymbol") or sym or "").upper()
+    meta = {"symbol": yahoo_symbol(name) if name else "", "currency": "INR", "exchangeTimezoneName": "Asia/Kolkata",
+            "gmtoffset": 19800, "source": "kite"}
+    if extra.get("previous_close") is not None:
+        meta["previousClose"] = meta["chartPreviousClose"] = extra["previous_close"]
+    if c:
+        meta["regularMarketPrice"] = c[-1]
+        meta["regularMarketTime"] = t[-1]
+    return {"chart": {"result": [{"meta": meta, "timestamp": t, "indicators": {"quote": [
+        {"open": o, "high": h, "low": l, "close": c, "volume": v}]}}], "error": None}}
+
+
 def load_chart(sym, interval, day, offline=None):
-    ysym = sym.upper().replace(".", "-")
+    sym = plain_symbol(sym)
+    ysym = yahoo_symbol(sym)
     if offline:
         path = offline
         if os.path.isdir(offline):
-            path = os.path.join(offline, ysym + ".json")
-            if not os.path.exists(path):
-                path += ".gz"
+            for name in (sym + ".json", sym + ".json.gz", ysym + ".json", ysym + ".json.gz"):
+                path = os.path.join(offline, name)
+                if os.path.exists(path):
+                    break
         if not os.path.exists(path):
             raise PlanError("no offline file %s" % path)
         try:
@@ -405,16 +519,17 @@ def load_chart(sym, interval, day, offline=None):
         except (OSError, ValueError) as e:
             raise PlanError("could not read %s: %s" % (path, e))
     else:
-        back = (to_eastern(utc_now()).date() - day).days
+        back = (to_ist(utc_now()).date() - day).days
         rng = "1d" if back <= 0 else "5d" if back <= 6 else "1mo" if back <= 28 else "60d"
         if interval == "1m" and back > 6:
             raise PlanError("Yahoo keeps 1-minute bars for about a week")
-        text = yahoo_get("/v8/finance/chart/%s?range=%s&interval=%s" % (ysym, rng, interval))
+        text = yahoo_get("/v8/finance/chart/%s?range=%s&interval=%s" % (urllib.parse.quote(ysym, safe="^."), rng, interval))
     try:
         data = json.loads(text)
+        data = kite_chart(data, sym) or data
         res = data["chart"]["result"]
     except (ValueError, KeyError, TypeError):
-        raise PlanError("Yahoo returned something unexpected for %s" % sym)
+        raise PlanError("the chart for %s is not a Yahoo chart or Kite candles" % sym)
     if not res:
         err = (data.get("chart") or {}).get("error") or {}
         raise PlanError("Yahoo has no data for %s: %s" % (sym, err.get("description") or "unknown ticker"))
@@ -440,7 +555,7 @@ def load_chart(sym, interval, day, offline=None):
 
 
 def session_bars(chart, day, interval, upto_slot=None, now_utc=None):
-    """Closed, on-grid bars of one New York session, oldest first (the live tick is dropped)."""
+    """Closed, on-grid bars of one IST session, oldest first (the live tick is dropped)."""
     step = INTERVALS[interval]
     s = session(day)
     if not s:
@@ -449,12 +564,12 @@ def session_bars(chart, day, interval, upto_slot=None, now_utc=None):
     close_dt = datetime.datetime.combine(day, s[1])
     if now_utc is None and chart.get("data_time"):
         now_utc = utc_of(chart["data_time"])
-    local = to_eastern(now_utc) if now_utc else None
+    local = to_ist(now_utc) if now_utc else None
     out = {}
     for b in chart["bars"]:
         if b["t"] % step:
             continue
-        et = to_eastern(utc_of(b["t"]))
+        et = to_ist(utc_of(b["t"]))
         if et.date() != day or not (open_dt <= et < close_dt):
             continue
         if local and et + datetime.timedelta(seconds=step) > local:
@@ -517,7 +632,7 @@ def resolve_flat_by(day, explicit, cfg, entry_time):
             if moved.time() <= OPEN:
                 raise PlanError("flat_by %s in the config is at or after the close" % hm(t))
             t = moved.time()
-            note = "moved up for the 1:00 p.m. early close (%s)" % NYSE_EARLY_CLOSE.get(day.isoformat(), "")
+            note = "moved up for the 1:00 p.m. early close (%s)" % NSE_EARLY_CLOSE.get(day.isoformat(), "")
     if entry_time and entry_time >= t:
         raise PlanError("the entry at %s is at or after your flat-by %s: there is no time left to hold it"
                         % (ampm(entry_time), hm(t)))
@@ -580,7 +695,7 @@ def build_plan(a, now_utc):
         except ValueError:
             raise PlanError("date wants YYYY-MM-DD, not %r" % info["date"])
     else:
-        day = to_eastern(now_utc).date()
+        day = to_ist(now_utc).date()
     entry_time = parse_clock(info["entry_time"], "the entry time") if info["entry_time"] else None
     atr = atr_n = None
     if stop_rule == "atr":
@@ -590,8 +705,11 @@ def build_plan(a, now_utc):
             raise PlanError("an atr stop needs at least 3 closed %s bars of %s on %s by the entry; found %d"
                             % (info["interval"], info["symbol"], day, len(bars)))
         atr, atr_n = atr_of(bars)
+    tick = cfg.get("tick_size")
+    if isinstance(tick, dict):
+        tick = tick.get(info["symbol"])
     c = compute(info["entry"], stop_rule, stop_param, target_rule, target_param, info["or_high"], info["or_low"],
-                atr, atr_n)
+                atr, atr_n, tick)
     flat_by, flat_note = resolve_flat_by(day, a.flat_by, cfg, entry_time)
     orr = None
     if info["or_high"] is not None and info["or_low"] is not None:
@@ -618,7 +736,7 @@ def build_plan(a, now_utc):
                             % (ratio(c["reward_risk"]), num(D(mrr))))
     except PlanError:
         pass
-    today = to_eastern(now_utc).date()
+    today = to_ist(now_utc).date()
     if day != today:
         warnings.append("This plan is for %s, not today (%s)." % (day.isoformat(), today.isoformat()))
     return plan, warnings
@@ -643,7 +761,8 @@ def describe(plan):
     out.append("  Target        %s  %s" % (money(plan["target"]), plan["target_label"]))
     out.append("  Risk a share  %s (%s%% of the entry)" % (money(plan["risk_per_share"]), pct))
     out.append("  Reward:risk   %s" % ratio(plan["reward_risk"]))
-    out.append("  Flat by       %s ET, win or lose: no overnight hold" % plan["flat_by"])
+    out.append("  Flat by       %s IST, win or lose: no overnight hold (Zerodha squares off MIS at about 15:20)"
+               % plan["flat_by"])
     out.append("Set before the entry. If price hits the stop, you are out; never move it further away.")
     out.append(NOTE)
     return out
@@ -685,7 +804,7 @@ def cmd_show(a):
         return 0
     for line in describe(dict({"setup": "orb", "interval": "5m", "stop_label": "", "target_label": ""}, **plan)):
         print(line)
-    today = to_eastern(parse_now(a.now)).date().isoformat()
+    today = to_ist(parse_now(a.now)).date().isoformat()
     if plan["date"] != today:
         print("Note: this plan is for %s, not today (%s)." % (plan["date"], today))
     return 0
@@ -709,10 +828,10 @@ def main(argv=None):
     p.add_argument("--side", default="buy", choices=["buy", "long", "sell", "short"], help="v2: buy only")
     p.add_argument("--stop", help="or-mid (orb default), or-low, price:X, pct:X, atr:K")
     p.add_argument("--target", help="2R (default), 1R, 1.5R, price:X")
-    p.add_argument("--flat-by", help="HH:MM New York (default: config flat_by, 15:55)")
+    p.add_argument("--flat-by", help="HH:MM IST (default: config flat_by, 15:10)")
     p.add_argument("--config", default="trader/config.json")
     p.add_argument("--offline", metavar="PATH", help="saved Yahoo chart JSON for an atr stop")
-    p.add_argument("--now", help='pretend it is this New York time, e.g. "2026-10-19 10:15"')
+    p.add_argument("--now", help='pretend it is this IST, e.g. "2026-10-19 10:15"')
     p.add_argument("--write", nargs="?", const="trader/plan.json", metavar="PATH",
                    help="save the plan (default trader/plan.json)")
     p.add_argument("--json", action="store_true")
